@@ -57,14 +57,17 @@ module.exports = async (req, res) => {
   if (/^\d{8,15}$/.test(rawValue)) {
     nim = rawValue;
   } else {
-    const m = rawValue.match(/\/show-ktm\/([^/?#]+)/);
+    // Isi QR bisa berupa link show-ktm/... atau kode terenkripsi mentah
+    const m =
+      rawValue.match(/\/show-ktm\/([^/?#]+)/) ||
+      (/^[0-9a-f]{32,}(_[0-9a-f]+)?$/i.test(rawValue) ? [null, rawValue] : null);
     if (!m) {
       return res.status(400).json({
         status: 'error',
         message: 'Format input tidak dikenali. Gunakan link show-ktm atau NIM.',
       });
     }
-    ktmUrl = rawValue;
+    ktmUrl = /^https?:\/\//i.test(rawValue) ? rawValue : '';
     const encryptedCode = m[1];
 
     let dec = null;
