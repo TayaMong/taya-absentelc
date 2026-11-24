@@ -11,7 +11,7 @@
     <div class="max-w-4xl mx-auto space-y-6">
         <div class="bg-white p-6 rounded-2xl shadow-md border border-gray-200">
             <h1 class="text-lg font-bold text-gray-800">Import Otomatis KTM MyTelU</h1>
-            <p class="text-xs text-gray-500 mt-1 mb-4">Tempel link <code class="bg-gray-100 px-1.5 py-0.5 rounded text-[#B6252A]">show-ktm/...</code> atau masukkan <b>NIM</b> untuk mengambil data dari API MyTelU dan menyimpannya ke <code class="bg-gray-100 px-1.5 py-0.5 rounded">data_ktm.json</code>.</p>
+            <p class="text-xs text-gray-500 mt-1 mb-4">Tempel link <code class="bg-gray-100 px-1.5 py-0.5 rounded text-[#B6252A]">show-ktm/...</code> atau masukkan <b>NIM</b> untuk mengambil data dari API MyTelU. Data disimpan di browser (localStorage) dan bisa diunduh sebagai <code class="bg-gray-100 px-1.5 py-0.5 rounded">data_ktm.json</code>.</p>
 
             <form id="importForm" class="flex flex-col sm:flex-row gap-3">
                 <input type="text" id="ktm_url" required
@@ -28,73 +28,120 @@
 
         <div>
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-sm font-bold text-gray-600 uppercase tracking-wider">Data Tersimpan (data_ktm.json)</h2>
-                <button onclick="loadSavedKTM()" class="text-xs text-[#B6252A] hover:underline font-medium">Refresh Data</button>
+                <h2 class="text-sm font-bold text-gray-600 uppercase tracking-wider">Data Tersimpan</h2>
+                <div class="flex gap-4">
+                    <button onclick="downloadJSON()" class="text-xs text-[#B6252A] hover:underline font-medium">Unduh data_ktm.json</button>
+                    <button onclick="loadSavedKTM()" class="text-xs text-[#B6252A] hover:underline font-medium">Refresh Data</button>
+                </div>
             </div>
             <div id="cardsContainer" class="grid md:grid-cols-2 gap-6"></div>
         </div>
     </div>
 
     <script>
+        const STORAGE_KEY = 'data_ktm';
+
+        // Parse JSON dengan aman (tidak melempar error saat body kosong / bukan JSON)
+        async function readJson(res) {
+            const text = await res.text();
+            if (!text) return null;
+            try { return JSON.parse(text); } catch { return null; }
+        }
+
+        function getLocal() {
+            try {
+                const d = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                return Array.isArray(d) ? d : [];
+            } catch { return []; }
+        }
+
+        function saveLocal(record) {
+            const list = getLocal();
+            const i = list.findIndex(x => x.nim === record.nim);
+            if (i >= 0) list[i] = record; else list.push(record);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        }
+
+        // Gabungkan data seed (data_ktm.json statis) dengan localStorage
+        async function getAllData() {
+            let seed = [];
+            try {
+                const res = await fetch('data_ktm.json', { cache: 'no-store' });
+                if (res.ok) {
+                    const d = await readJson(res);
+                    if (Array.isArray(d)) seed = d;
+                }
+            } catch {}
+            const map = new Map();
+            seed.forEach(x => map.set(x.nim, x));
+            getLocal().forEach(x => map.set(x.nim, x));
+            return [...map.values()];
+        }
+
+        async function downloadJSON() {
+            const list = await getAllData();
+            const blob = new Blob([JSON.stringify(list, null, 4)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'data_ktm.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
         async function loadSavedKTM() {
             const container = document.getElementById('cardsContainer');
-            try {
-                const res = await fetch('scrape_ktm.php');
-                const list = await res.json();
+            const list = await getAllData();
 
-                if (!list.length) {
-                    container.innerHTML = `<p class="text-sm text-gray-400">Belum ada data KTM tersimpan di data_ktm.json.</p>`;
-                    return;
-                }
+            if (!list.length) {
+                container.innerHTML = `<p class="text-sm text-gray-400">Belum ada data KTM tersimpan.</p>`;
+                return;
+            }
 
-                container.innerHTML = list.slice().reverse().map(item => `
-                    <div class="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-200">
-                        <div class="p-5 text-center bg-white">
-                            <h3 class="text-lg font-extrabold text-gray-800">Universitas <span class="text-[#B6252A]">Telkom</span></h3>
-                            <p class="text-[10px] text-gray-500 tracking-[0.25em] uppercase mt-2">${item.fakultas}</p>
-                            <p class="text-xs font-semibold text-gray-700 mt-1.5">${item.prodi}</p>
+            container.innerHTML = list.slice().reverse().map(item => `
+                <div class="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-200">
+                    <div class="p-5 text-center bg-white">
+                        <h3 class="text-lg font-extrabold text-gray-800">Universitas <span class="text-[#B6252A]">Telkom</span></h3>
+                        <p class="text-[10px] text-gray-500 tracking-[0.25em] uppercase mt-2">${item.fakultas || ''}</p>
+                        <p class="text-xs font-semibold text-gray-700 mt-1.5">${item.prodi || ''}</p>
+                    </div>
+
+                    <div class="bg-[#ED1E28] p-5 text-white flex gap-4 items-center">
+                        <div class="w-16 h-16 rounded-full bg-white flex items-center justify-center shrink-0 overflow-hidden shadow">
+                            ${item.photo
+                                ? `<img src="${item.photo}" alt="Foto" class="w-full h-full object-cover">`
+                                : `<span class="text-[#ED1E28] font-black text-base">Tel-U</span>`
+                            }
                         </div>
 
-                        <div class="bg-[#ED1E28] p-5 text-white flex gap-4 items-center">
-                            <div class="w-16 h-16 rounded-full bg-white flex items-center justify-center shrink-0 overflow-hidden shadow">
-                                ${item.photo 
-                                    ? `<img src="${item.photo}" alt="Foto" class="w-full h-full object-cover">` 
-                                    : `<span class="text-[#ED1E28] font-black text-base">Tel-U</span>`
-                                }
+                        <div class="space-y-1.5 text-xs w-full">
+                            <div>
+                                <p class="text-[10px] text-white/80">Nama</p>
+                                <p class="font-bold uppercase text-sm leading-tight">${item.nama}</p>
                             </div>
-
-                            <div class="space-y-1.5 text-xs w-full">
+                            <div>
+                                <p class="text-[10px] text-white/80">Nomor Induk Mahasiswa</p>
+                                <p class="font-bold">${item.nim}</p>
+                            </div>
+                            ${item.kelas ? `
+                            <div>
+                                <p class="text-[10px] text-white/80">Kelas</p>
+                                <p class="font-bold">${item.kelas}</p>
+                            </div>` : ''}
+                            <div class="flex justify-between items-end pt-1">
                                 <div>
-                                    <p class="text-[10px] text-white/80">Nama</p>
-                                    <p class="font-bold uppercase text-sm leading-tight">${item.nama}</p>
+                                    <p class="text-[10px] text-white/80">Angkatan</p>
+                                    <p class="font-bold">${item.angkatan || ''}</p>
                                 </div>
                                 <div>
-                                    <p class="text-[10px] text-white/80">Nomor Induk Mahasiswa</p>
-                                    <p class="font-bold">${item.nim}</p>
-                                </div>
-                                ${item.kelas ? `
-                                <div>
-                                    <p class="text-[10px] text-white/80">Kelas</p>
-                                    <p class="font-bold">${item.kelas}</p>
-                                </div>` : ''}
-                                <div class="flex justify-between items-end pt-1">
-                                    <div>
-                                        <p class="text-[10px] text-white/80">Angkatan</p>
-                                        <p class="font-bold">${item.angkatan}</p>
-                                    </div>
-                                    <div>
-                                        <span class="bg-blue-500 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
-                                            ${item.role}
-                                        </span>
-                                    </div>
+                                    <span class="bg-blue-500 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
+                                        ${item.role || ''}
+                                    </span>
                                 </div>
                             </div>
                         </div>
                     </div>
-                `).join('');
-            } catch (err) {
-                container.innerHTML = `<p class="text-sm text-red-500">Gagal memuat data_ktm.json.</p>`;
-            }
+                </div>
+            `).join('');
         }
 
         document.getElementById('importForm').addEventListener('submit', async (e) => {
@@ -111,13 +158,18 @@
             debugBox.classList.add('hidden');
 
             try {
-                const res = await fetch('scrape_ktm.php', {
+                const res = await fetch('/api/ktm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ktm_url: urlInput.value })
+                    body: JSON.stringify({ ktm_url: urlInput.value.trim() })
                 });
 
-                const result = await res.json();
+                const result = await readJson(res);
+
+                if (!result) {
+                    throw new Error(`Server mengembalikan respons kosong/non-JSON (HTTP ${res.status}). Pastikan file api/ktm.js ikut ter-deploy.`);
+                }
+
                 msg.textContent = result.message;
                 msg.className = `text-xs mt-3 font-medium block ${result.status === 'success' ? 'text-green-600' : 'text-red-600'}`;
 
@@ -128,7 +180,8 @@
                     debugBox.classList.remove('hidden');
                 }
 
-                if (result.status === 'success') {
+                if (result.status === 'success' && result.data) {
+                    saveLocal(result.data);
                     urlInput.value = '';
                     loadSavedKTM();
                 }
