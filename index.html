@@ -3,26 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto-Import KTM MyTelU ke JSON</title>
+    <title>Scan QR KTM MyTelU</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen py-10 px-4">
 
     <div class="max-w-4xl mx-auto space-y-6">
         <div class="bg-white p-6 rounded-2xl shadow-md border border-gray-200">
-            <h1 class="text-lg font-bold text-gray-800">Import Otomatis KTM MyTelU</h1>
-            <p class="text-xs text-gray-500 mt-1 mb-4">Tempel link <code class="bg-gray-100 px-1.5 py-0.5 rounded text-[#B6252A]">show-ktm/...</code> atau masukkan <b>NIM</b> untuk mengambil data dari API MyTelU. Data disimpan di browser (localStorage) dan bisa diunduh sebagai <code class="bg-gray-100 px-1.5 py-0.5 rounded">data_ktm.json</code>.</p>
+            <h1 class="text-lg font-bold text-gray-800">Scan QR KTM MyTelU</h1>
+            <p class="text-xs text-gray-500 mt-1 mb-4">Arahkan kamera ke QR KTM, atau pilih gambar QR dari galeri. Data akan diambil otomatis dari API MyTelU dan disimpan di browser (localStorage).</p>
 
-            <form id="importForm" class="flex flex-col sm:flex-row gap-3">
-                <input type="text" id="ktm_url" required
-                    placeholder="Tempel link show-ktm atau masukkan NIM (contoh: 109012630002)"
-                    class="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:border-[#B6252A]">
-                <button type="submit" id="submitBtn"
-                    class="px-6 py-2.5 bg-[#B6252A] hover:bg-[#961d22] text-white font-semibold text-sm rounded-xl transition shrink-0">
-                    Ambil & Simpan Data
-                </button>
-            </form>
-            <p id="statusMsg" class="text-xs mt-3 font-medium hidden"></p>
+            <div class="flex flex-col items-center gap-4">
+                <div id="reader" class="w-full max-w-sm rounded-xl overflow-hidden bg-gray-900 hidden"></div>
+
+                <div class="flex flex-wrap justify-center gap-3">
+                    <button id="scanBtn"
+                        class="px-6 py-2.5 bg-[#B6252A] hover:bg-[#961d22] text-white font-semibold text-sm rounded-xl transition">
+                        Mulai Scan Kamera
+                    </button>
+                    <button id="fileBtn"
+                        class="px-6 py-2.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold text-sm rounded-xl transition">
+                        Upload Gambar QR
+                    </button>
+                    <input type="file" id="fileInput" accept="image/*" class="hidden">
+                </div>
+            </div>
+
+            <p id="statusMsg" class="text-xs mt-4 font-medium hidden text-center"></p>
             <pre id="debugBox" class="hidden mt-3 p-3 bg-gray-900 text-green-400 text-[11px] rounded-xl overflow-x-auto"></pre>
         </div>
 
@@ -40,8 +48,23 @@
 
     <script>
         const STORAGE_KEY = 'data_ktm';
+        const msg = document.getElementById('statusMsg');
+        const debugBox = document.getElementById('debugBox');
+        const readerEl = document.getElementById('reader');
+        const scanBtn = document.getElementById('scanBtn');
+        const fileBtn = document.getElementById('fileBtn');
+        const fileInput = document.getElementById('fileInput');
 
-        // Parse JSON dengan aman (tidak melempar error saat body kosong / bukan JSON)
+        let qr = null;
+        let scanning = false;
+        let processing = false;
+
+        function setStatus(text, type) {
+            const color = { ok: 'text-green-600', err: 'text-red-600', info: 'text-gray-500' }[type] || 'text-gray-500';
+            msg.className = `text-xs mt-4 font-medium text-center block ${color}`;
+            msg.textContent = text;
+        }
+
         async function readJson(res) {
             const text = await res.text();
             if (!text) return null;
@@ -62,7 +85,6 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
         }
 
-        // Gabungkan data seed (data_ktm.json statis) dengan localStorage
         async function getAllData() {
             let seed = [];
             try {
@@ -144,34 +166,26 @@
             `).join('');
         }
 
-        document.getElementById('importForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('submitBtn');
-            const msg = document.getElementById('statusMsg');
-            const debugBox = document.getElementById('debugBox');
-            const urlInput = document.getElementById('ktm_url');
-
-            btn.disabled = true;
-            btn.textContent = 'Mengambil Data...';
-            msg.className = 'text-xs mt-3 font-medium text-gray-500 block';
-            msg.textContent = 'Menghubungi API Telkom University...';
+        // Kirim hasil scan ke API
+        async function processQR(decodedText) {
+            if (processing) return;
+            processing = true;
             debugBox.classList.add('hidden');
+            setStatus('QR terbaca. Menghubungi API Telkom University...', 'info');
 
             try {
                 const res = await fetch('/api/ktm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ktm_url: urlInput.value.trim() })
+                    body: JSON.stringify({ ktm_url: decodedText.trim() })
                 });
 
                 const result = await readJson(res);
-
                 if (!result) {
                     throw new Error(`Server mengembalikan respons kosong/non-JSON (HTTP ${res.status}). Pastikan file api/ktm.js ikut ter-deploy.`);
                 }
 
-                msg.textContent = result.message;
-                msg.className = `text-xs mt-3 font-medium block ${result.status === 'success' ? 'text-green-600' : 'text-red-600'}`;
+                setStatus(result.message, result.status === 'success' ? 'ok' : 'err');
 
                 if (result.api_response) {
                     debugBox.textContent = typeof result.api_response === 'string'
@@ -182,15 +196,64 @@
 
                 if (result.status === 'success' && result.data) {
                     saveLocal(result.data);
-                    urlInput.value = '';
                     loadSavedKTM();
                 }
             } catch (err) {
-                msg.textContent = 'Error: ' + err.message;
-                msg.className = 'text-xs mt-3 font-medium text-red-600 block';
+                setStatus('Error: ' + err.message, 'err');
             } finally {
-                btn.disabled = false;
-                btn.textContent = 'Ambil & Simpan Data';
+                processing = false;
+            }
+        }
+
+        async function stopScan() {
+            if (qr && scanning) {
+                try { await qr.stop(); } catch {}
+            }
+            scanning = false;
+            readerEl.classList.add('hidden');
+            scanBtn.textContent = 'Mulai Scan Kamera';
+        }
+
+        async function startScan() {
+            if (!qr) qr = new Html5Qrcode('reader');
+            readerEl.classList.remove('hidden');
+            setStatus('Mengaktifkan kamera...', 'info');
+
+            try {
+                await qr.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 240, height: 240 } },
+                    async (text) => {
+                        await stopScan();
+                        processQR(text);
+                    },
+                    () => {}
+                );
+                scanning = true;
+                scanBtn.textContent = 'Stop Scan';
+                setStatus('Arahkan kamera ke QR KTM.', 'info');
+            } catch (err) {
+                readerEl.classList.add('hidden');
+                setStatus('Tidak bisa mengakses kamera: ' + (err.message || err) + '. Pastikan izin kamera diberikan, atau gunakan Upload Gambar QR.', 'err');
+            }
+        }
+
+        scanBtn.addEventListener('click', () => scanning ? stopScan() : startScan());
+        fileBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            await stopScan();
+            if (!qr) qr = new Html5Qrcode('reader');
+            setStatus('Membaca QR dari gambar...', 'info');
+            try {
+                const text = await qr.scanFile(file, false);
+                await processQR(text);
+            } catch {
+                setStatus('QR tidak terdeteksi pada gambar. Coba gambar yang lebih jelas.', 'err');
+            } finally {
+                fileInput.value = '';
             }
         });
 
